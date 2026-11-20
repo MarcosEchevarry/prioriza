@@ -169,6 +169,33 @@ details.qi .dot{margin-top:6px}
 .imp-res ul{margin:6px 0 10px;padding-left:18px}
 .warn{background:var(--bad-bg);color:var(--bad);border-radius:12px;padding:10px 12px;margin-top:10px;font-size:14px}
 .figflag{font-size:12px;color:var(--acc);font-weight:600;margin-bottom:8px}
+.today{display:flex;gap:14px;align-items:center}
+.ring{--p:0;--rc:var(--acc);width:68px;height:68px;flex:none;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--rc) calc(var(--p)*1turn),var(--chip) 0)}
+.ring.done{--rc:var(--ok)}
+.ring>div{width:54px;height:54px;border-radius:50%;background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.05}
+.ring b{font-size:20px;font-weight:700}.ring span{font-size:10px;color:var(--muted)}
+.tinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.streak{font-weight:700;font-size:16px}
+.metabtn{font:inherit;font-size:11px;line-height:1.2;color:var(--muted);background:var(--chip);border:0;border-radius:10px;padding:7px 9px;cursor:pointer;text-align:center;flex:none}
+.metabtn b{font-size:16px;color:var(--ink)}
+.maptop{font-size:14px;margin-bottom:6px}
+.bar.stack{display:flex}.bar.stack i{border-radius:0}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:8px 0 12px}
+.sw{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.sw.nt{background:var(--line)}
+.mapd{margin-bottom:12px}
+.tiles{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.tile{font:inherit;font-size:12px;line-height:1.25;text-align:left;padding:6px 9px;border-radius:9px;border:1px solid var(--line);cursor:pointer;color:var(--muted);background:var(--chip);display:inline-flex;gap:6px;align-items:baseline}
+.tile b{font-size:11px;font-weight:700}
+.tile.lo{background:var(--bad-bg);color:var(--bad);border-color:transparent}
+.tile.mid{background:color-mix(in srgb,var(--acc) 16%,var(--card));color:var(--ink);border-color:transparent}
+.tile.mid b{color:var(--acc)}
+.tile.hi{background:var(--ok-bg);color:var(--ok);border-color:transparent}
+.rprog{margin:0 2px 10px}.rprog .bar{margin-top:4px}
+.rsum .rtit{font-size:20px;font-weight:700;margin:4px 0 2px}
+.rbig{display:flex;align-items:baseline;gap:8px;margin:6px 0 10px}.rbig b{font-size:40px;letter-spacing:-.02em;color:var(--pri)}.rbig span{color:var(--muted)}
+.rsec{border-top:1px solid var(--line);padding:10px 0 4px}.rsec .t{font-weight:600;font-size:14px;margin-bottom:4px}
+.rsec ul{margin:0;padding-left:18px;font-size:14px}.rsec li{margin:2px 0}
 </style>
 </head>
 <body>

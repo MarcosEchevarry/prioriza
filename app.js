@@ -567,10 +567,10 @@ const MAX_TENT=5000;
 const L='ABCDE';
 const PDFJS=window.PDFJS_BASE||'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
 
-let S={tent:[],leit:{},com:{},custom:[],imp:{},perfil:'bb'};
+let S={tent:[],leit:{},com:{},custom:[],imp:{},perfil:'bb',metas:[]};
 let QMAP={};
 const PERM={};
-const U={tab:'painel',mode:'smart',disc:'',topic:'',cur:null,why:'',answered:null,last:null,sess:{n:0,ok:0},bankQ:'',bankD:'',bankF:'',openId:null,pending:null};
+const U={tab:'painel',mode:'smart',disc:'',topic:'',cur:null,why:'',answered:null,last:null,sess:{n:0,ok:0},round:{n:0,ok:0,g:0,ids:[],t0:0,dom0:{}},roundSum:null,bankQ:'',bankD:'',bankF:'',openId:null,pending:null};
 
 // ---------- utilidades ----------
 const $=s=>document.querySelector(s);
@@ -600,7 +600,7 @@ function discOrder(){
   const present=new Set(allQ().map(q=>q.d));
   return Object.keys(DISC).filter(d=>wDisc(d)>0||present.has(d)).sort((a,b)=>wDisc(b)-wDisc(a));
 }
-function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),2000)}
+function toast(msg,ms){const t=$('#toast');t.textContent=msg;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),ms||2000)}
 
 // ---------- motor ----------
 function topics(){
@@ -639,12 +639,15 @@ function pickNext(){
   let tps=all.filter(t=>(!U.disc||t.d===U.disc)&&(!U.topic||t.k===U.topic));
   if(!U.disc&&!U.topic)tps=tps.filter(t=>t.peso>0);
   if(!tps.length)return null;
+  // evita repetir questão respondida há menos de 5 min: prefere assuntos que ainda têm questão "descansada"
+  {const lim=Date.now()-5*6e4,ok=id=>id!==U.last&&(!h[id]||h[id].last<lim),t2=tps.filter(t=>t.qs.some(ok));if(t2.length)tps=t2}
   const ranked=all.filter(t=>t.peso>0).sort((a,b)=>b.prio-a.prio);
   let ws=tps.map(t=>t.prio*t.prio),tot=ws.reduce((a,b)=>a+b,0);
   if(tot<=0){ws=tps.map(()=>1);tot=tps.length}
   let r=Math.random()*tot,t=tps[tps.length-1];
   for(let i=0;i<tps.length;i++){r-=ws[i];if(r<=0){t=tps[i];break}}
-  let cands=t.qs.filter(id=>id!==U.last);if(!cands.length)cands=t.qs;
+  const now5=Date.now()-5*6e4;
+  let cands=t.qs.filter(id=>id!==U.last&&(!h[id]||h[id].last<now5));if(!cands.length)cands=t.qs.filter(id=>id!==U.last);if(!cands.length)cands=t.qs;
   const unseen=cands.filter(id=>!h[id]);
   const id=unseen.length?unseen[Math.floor(Math.random()*unseen.length)]:[...cands].sort((a,b)=>h[a].last-h[b].last)[0];
   const rank=ranked.findIndex(x=>x.k===t.k)+1;
@@ -665,6 +668,43 @@ function schedule(id,ok,g,now){
   S.leit[id]={b,d:now+INTERVALS[b]};
 }
 function nextMsg(id){const v=S.leit[id];return v?until(v.d):null}
+
+// ---------- hábito: meta diária, sequência e rodadas ----------
+const META_DEF=10,ROUND=10;
+const dk=t=>{const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+function metaNow(){const m=S.metas||[];return m.length?m[m.length-1][1]:META_DEF}
+function metaAt(t){let v=META_DEF;for(const x of (S.metas||[]))if(x[0]<=t)v=x[1];return v}
+function weekKey(t){const x=new Date(t);x.setHours(0,0,0,0);x.setDate(x.getDate()-((x.getDay()+6)%7));return dk(x)}
+// Sequência = dias seguidos batendo a meta. Uma proteção por semana (seg–dom) cobre um dia sem meta,
+// desde que o dia seguinte volte a bater a meta (dois dias seguidos sem meta zeram a sequência).
+function habit(){
+  const c={};let first=Infinity;
+  for(const at of dedupTent(S.tent)){const k=dk(at.t);c[k]=(c[k]||0)+1;if(at.t<first)first=at.t}
+  const d0=new Date();d0.setHours(0,0,0,0);
+  const meta=metaNow(),hoje=c[dk(d0)]||0;
+  let run=0,best=0,pend=false,lastFreeze=null;const used=new Set();
+  if(first<Infinity){
+    const d=new Date(first);d.setHours(0,0,0,0);
+    while(d<d0){
+      const k=dk(d),nx=new Date(d);nx.setDate(nx.getDate()+1);
+      if((c[k]||0)>=metaAt(nx.getTime()-1)){run++;pend=false}
+      else if(run>0&&!pend&&!used.has(weekKey(d))){used.add(weekKey(d));pend=true;lastFreeze=k}
+      else{run=0;pend=false}
+      if(run>best)best=run;
+      d.setTime(nx.getTime());
+    }
+  }
+  const y=new Date(d0);y.setDate(y.getDate()-1);
+  const done=hoje>=meta;if(done)run++;if(run>best)best=run;
+  return {hoje,meta,done,run,best,freeze:!used.has(weekKey(d0)),frozeY:pend&&lastFreeze===dk(y)};
+}
+function topicDom(k){
+  const now=Date.now();let w1=0,w0=0,n=0;
+  for(const at of S.tent){const q=QMAP[at.q];if(!q||tkey(q)!==k)continue;const w=Math.pow(.5,(now-at.t)/DAY/HALF_LIFE);if(at.o&&at.g){w1+=w*.5;w0+=w*.5}else if(at.o)w1+=w;else w0+=w;n++}
+  return {dom:(1+w1)/(2+w1+w0),n};
+}
+const newRound=()=>({n:0,ok:0,g:0,ids:[],t0:0,dom0:{}});
+const dias=n=>n===1?'1 dia':n+' dias';
 // Um bug antigo gravava vários erros seguidos quando a mesma questão era tocada de novo.
 // Respostas à mesma questão em menos de 5 min contam como uma só (vale a primeira).
 function mergeData(a,b){
@@ -676,6 +716,7 @@ function mergeData(a,b){
   o.imp={...b.imp,...Object.fromEntries(Object.entries(a.imp).filter(([,v])=>v.length))};
   o.impT={...b.impT,...Object.fromEntries(Object.entries(a.impT||{}).filter(([,v])=>Object.keys(v).length))};
   o.mat={...b.mat,...a.mat};o.matQ={...b.matQ,...a.matQ};o.sim={...b.sim,...a.sim};
+  o.metas=(a.metas&&a.metas.length)?a.metas:(b.metas||[]);
   return o;
 }
 function dedupTent(arr){
@@ -691,14 +732,20 @@ function answer(orig){
   const q=QMAP[U.cur];if(!q||U.answered)return;
   const ok=orig===q.c, now=Date.now();
   const g=!!U.guess;
+  const k=tkey(q),before=topicDom(k),h0=habit();
+  const R=U.round;if(!R.n)R.t0=now;if(!(k in R.dom0))R.dom0[k]=before.dom;
   const at={q:q.id,o:ok?1:0,t:now};if(g)at.g=1;
   S.tent.push(at);
+  R.n++;if(ok)R.ok++;if(ok&&g)R.g++;R.ids.push(q.id);
   if(S.tent.length>MAX_TENT)S.tent=S.tent.slice(-MAX_TENT);
   const prev=S.leit[q.id]?{...S.leit[q.id]}:null;
   schedule(q.id,ok,g,now);
   U.answered={ch:orig,ok,g,prev,t:now};U.sess.n++;if(ok)U.sess.ok++;
   save('progresso');render();
   const fb=$('#fb');if(fb)fb.scrollIntoView({behavior:'smooth',block:'nearest'});
+  const after=topicDom(k),h1=habit();
+  if(!h0.done&&h1.done)toast(`🎯 Meta do dia batida! 🔥 ${dias(h1.run)} seguidos`,3500);
+  else if(lvl(before.dom)!=='hi'&&lvl(after.dom)==='hi'&&after.n>=3)toast(`🟩 Assunto no verde: ${q.a}`,3000);
 }
 
 // ---------- armazenamento ----------
@@ -706,7 +753,7 @@ const LK='prioriza-bancarios-v1';
 const ST={mode:'none',db:null,uid:null,busy:{},dirty:{},timers:{}};
 function docNames(){return ['progresso','comentarios','questoes','materiais','simulados',...Object.keys(S.sim||{}).map(id=>'sim_'+id),...Object.keys(PROVAS).map(id=>'imp_'+id),...Object.keys(S.mat||{}).flatMap(id=>['mat_'+id,'matq_'+id])]}
 function payload(n){
-  if(n==='progresso')return {v:1,t:S.tent,l:S.leit,p:S.perfil};
+  if(n==='progresso')return {v:1,t:S.tent,l:S.leit,p:S.perfil,m:S.metas};
   if(n==='comentarios')return {v:1,c:S.com};
   if(n==='questoes')return {v:1,q:S.custom};
   if(n==='simulados'){const r={};for(const [k,v] of Object.entries(S.sim||{}))r[k]=v.n;return {v:1,ids:r}}
@@ -732,7 +779,8 @@ function norm(o){
     mat:(()=>{const r={};if(o.mat&&typeof o.mat==='object')for(const k in o.mat){const m=o.mat[k];if(m&&typeof m.t==='string'&&DISC[m.d]&&Array.isArray(m.secs))r[k]={id:k,t:m.t,d:m.d,pages:m.pages||0,secs:m.secs.filter(x=>x&&typeof x.tx==='string'&&typeof x.t==='string').map(x=>({t:x.t,k:x.k||'teo',p0:+x.p0||1,p1:+x.p1||+x.p0||1,tx:x.tx,tp:Array.isArray(x.tp)?x.tp.filter(y=>typeof y==='string'):[]}))}}return r})(),
     matQ:(()=>{const r={};if(o.matQ&&typeof o.matQ==='object')for(const k in o.matQ)if(Array.isArray(o.matQ[k]))r[k]=o.matQ[k].filter(validQ).map(q=>fixTopic({...q,u:1,f:1,mt:k}));return r})(),
     sim:(()=>{const r={};if(o.sim&&typeof o.sim==='object')for(const k in o.sim){const x=o.sim[k];if(!x||!Array.isArray(x.qs))continue;const t={};if(x.t&&typeof x.t==='object')for(const y in x.t)if(typeof x.t[y]==='string')t[y]=x.t[y];r[k]={n:typeof x.n==='string'&&x.n?x.n:'Simulado',t,qs:x.qs.filter(validQ).map(q=>fixTopic({...q,u:1,f:1,gs:k}))}}return r})(),
-    perfil:PERFIS[o.perfil]?o.perfil:'bb'
+    perfil:PERFIS[o.perfil]?o.perfil:'bb',
+    metas:Array.isArray(o.metas)?o.metas.filter(x=>Array.isArray(x)&&Number.isFinite(+x[0])&&Number.isInteger(+x[1])&&+x[1]>=1&&+x[1]<=300).map(x=>[+x[0],+x[1]]).sort((a,b)=>a[0]-b[0]):[]
   };
 }
 // Dados no aparelho: IndexedDB (cabe muito mais que o localStorage); localStorage só como reserva.
@@ -749,7 +797,7 @@ async function writeLocalNow(){
 // Progresso e comentários (pequenos) vão na hora para o localStorage, que grava na mesma instrução;
 // o resto (questões importadas, textos, aulas) vai logo depois para o IndexedDB.
 const LKP=LK+'-progresso';
-function saveLight(){try{localStorage.setItem(LKP,JSON.stringify({tent:S.tent,leit:S.leit,com:S.com,perfil:S.perfil,custom:S.custom}))}catch(e){}}
+function saveLight(){try{localStorage.setItem(LKP,JSON.stringify({tent:S.tent,leit:S.leit,com:S.com,perfil:S.perfil,custom:S.custom,metas:S.metas}))}catch(e){}}
 function saveLocal(){saveLight();clearTimeout(IDB.timer);IDB.timer=setTimeout(writeLocalNow,60)}
 async function loadLocal(){
   IDB.db=await idbOpen();
@@ -832,6 +880,7 @@ async function boot(){
       tent:got.progresso?got.progresso.t:S.tent,
       leit:got.progresso?got.progresso.l:S.leit,
       perfil:got.progresso&&got.progresso.p?got.progresso.p:S.perfil,
+      metas:got.progresso&&Array.isArray(got.progresso.m)?got.progresso.m:S.metas,
       com:got.comentarios?got.comentarios.c:S.com,
       custom:got.questoes?got.questoes.q:S.custom,
       imp,impT,mat:mats,matQ,sim:sims
@@ -1392,8 +1441,9 @@ function renderPainel(){
   const nHoje=S.tent.filter(t=>t.t>=today.getTime()).length;
   const due=dueList(false).length,nd=nextDue();
   const top=tps.filter(t=>t.peso>0).sort((a,b)=>b.prio-a.prio).slice(0,6);
-  const nImp=impQ().length;
+  const nImp=impQ().length,H=habit();
   let h=`<label class="lb" for="perfilSel" style="margin-top:0">Edital-alvo (define os pesos)</label><select id="perfilSel" style="margin-bottom:12px">${Object.entries(PERFIS).map(([k,p])=>`<option value="${k}" ${S.perfil===k?'selected':''}>${esc(p.full.split(' (')[0])}</option>`).join('')}</select>
+  ${todayCard(H)}
   <div class="kpis">
     <div class="card kpi" style="margin:0"><b>${n}</b><span>respondidas${nHoje?` · ${nHoje} hoje`:''}</span></div>
     <div class="card kpi" style="margin:0"><b>${n?pct(ok/n)+'%':'–'}</b><span>de acerto${okG?` · ${okG} no chute`:''}</span></div>
@@ -1410,7 +1460,7 @@ function renderPainel(){
         ${barHtml(t.dom,t.n)}${refLinks(t.d,t.a,null,'rev mini')}</div>
       <button class="btn small ghost" data-act="train-topic" data-k="${esc(t.k)}">Treinar</button></div>`;
   });
-  h+=`</div><h2>Por disciplina</h2><div class="card">`;
+  h+=`</div>${mapHtml(tps)}<h2>Por disciplina</h2><div class="card">`;
   for(const d of discOrder()){
     const x=ds[d],w=P().w[d];
     h+=`<button class="disc" data-act="train-disc" data-d="${d}">
@@ -1427,6 +1477,9 @@ function renderPainel(){
     <p><b>Domínio:</b> sua taxa de acerto no assunto, com as respostas recentes valendo mais (uma resposta perde metade do peso a cada ${HALF_LIFE} dias). Assunto sem respostas começa em 50%.</p>
     <p><b>Revisões espaçadas:</b> questão errada volta em 10 min e recomeça a escada (1, 3, 7, 21, 45, 90 e 180 dias a cada acerto). Questão nova acertada com certeza volta em 7 dias. Depois do último degrau ela é considerada dominada e sai das revisões.</p>
     <p><b>Chute:</b> toque em "Vou chutar" antes de responder quando não tiver certeza. Acerto no chute vale metade no domínio e a questão volta no dia seguinte. Se esquecer de marcar, use "Na verdade, chutei" depois de ver o resultado.</p>
+    <p><b>Meta diária e sequência:</b> cada dia em que você responde a meta (padrão 10 questões, ajustável) soma 1 na sequência 🔥. Uma vez por semana, um dia sem meta é coberto por uma proteção ❄️, se no dia seguinte você voltar a bater a meta.</p>
+    <p><b>Rodadas:</b> o treino vem em rodadas de ${ROUND} questões. No fim de cada uma aparece o resumo: acertos, assuntos que subiram ou caíram e quantas questões voltam para revisão.</p>
+    <p><b>Mapa do edital:</b> cada assunto fica vermelho (domínio abaixo de 50%), amarelo (50% a 69%) ou verde (70% ou mais). Cinza é assunto ainda não treinado.</p>
     <p><b>Treino inteligente:</b> cerca de 40% das vezes traz uma revisão pendente; nas outras, sorteia um assunto com mais chance para os de maior prioridade.</p>
   </details></div>
   <div class="card"><details class="info"><summary>Questões reais e direitos autorais</summary>
@@ -1444,6 +1497,49 @@ function renderPainel(){
   return h;
 }
 
+function todayCard(H){
+  const p=Math.min(1,H.hoje/H.meta),falta=H.meta-H.hoje;
+  const msg=H.done?(H.hoje>H.meta?`Meta batida ✓ · ${H.hoje-H.meta} além da meta`:'Meta de hoje batida ✓'):`${falta===1?'Falta 1 questão':'Faltam '+falta+' questões'}${H.run?' para manter a sequência':' para começar uma sequência'}`;
+  return `<div class="card today">
+    <div class="ring ${H.done?'done':''}" style="--p:${p.toFixed(3)}" role="img" aria-label="${H.hoje} de ${H.meta} questões hoje"><div><b>${H.hoje}</b><span>de ${H.meta}</span></div></div>
+    <div class="tinfo">
+      <div class="streak">${H.run?'🔥 '+dias(H.run)+' seguidos':'🔥 Sem sequência ainda'}</div>
+      <div class="small">${msg}</div>
+      <div class="tiny muted">${H.frozeY?'❄️ Ontem foi coberto pela proteção da semana':H.freeze?'❄️ 1 proteção disponível nesta semana':'❄️ Proteção da semana já usada'}${H.best>H.run?' · recorde: '+dias(H.best):''}</div>
+    </div>
+    <button class="metabtn" data-act="meta-open" aria-label="Mudar meta diária">Meta<br><b>${H.meta}</b>/dia</button>
+  </div>`;
+}
+function mapHtml(tps){
+  const ds=discOrder().filter(d=>wDisc(d)>0);
+  const all=tps.filter(t=>wDisc(t.d)>0);if(!all.length)return '';
+  const g=all.filter(t=>t.n&&lvl(t.dom)==='hi').length,y=all.filter(t=>t.n&&lvl(t.dom)==='mid').length,r=all.filter(t=>t.n&&lvl(t.dom)==='lo').length;
+  let h=`<h2>Mapa do edital</h2><div class="card">
+    <div class="maptop"><b>${g} de ${all.length}</b> assuntos no verde</div>
+    <div class="bar stack" aria-hidden="true"><i class="hi" style="width:${g/all.length*100}%"></i><i class="mid" style="width:${y/all.length*100}%"></i><i class="lo" style="width:${r/all.length*100}%"></i></div>
+    <div class="legend tiny muted"><span><i class="sw hi"></i>dominado ${g}</span><span><i class="sw mid"></i>em progresso ${y}</span><span><i class="sw lo"></i>fraco ${r}</span><span><i class="sw nt"></i>não treinado ${all.length-g-y-r}</span></div>`;
+  for(const d of ds){
+    const ts=tps.filter(t=>t.d===d).sort((a,b)=>a.a.localeCompare(b.a,'pt'));if(!ts.length)continue;
+    h+=`<div class="mapd">${discChip(d)}<div class="tiles">${ts.map(t=>`<button class="tile ${t.n?lvl(t.dom):'nt'}" data-act="train-topic" data-k="${esc(t.k)}">${esc(t.a)}<b>${t.n?pct(t.dom)+'%':'–'}</b></button>`).join('')}</div></div>`;
+  }
+  return h+`<div class="tiny muted">Toque num assunto para treinar só ele.</div></div>`;
+}
+function roundSummary(R){
+  const H=habit(),up=R.tp.filter(t=>t.to-t.from>=.01).sort((a,b)=>(b.to-b.from)-(a.to-a.from)).slice(0,3),down=R.tp.filter(t=>t.from-t.to>=.01).sort((a,b)=>(a.to-a.from)-(b.to-b.from)).slice(0,3);
+  const nota=R.ok/R.n,tit=nota>=.9?'Rodada excelente!':nota>=.7?'Boa rodada!':nota>=.5?'Rodada concluída':'Rodada difícil, mas valeu';
+  const row=t=>`<li>${esc(t.a)} <span class="muted">${pct(t.from)}% → <b>${pct(t.to)}%</b></span></li>`;
+  return `<div class="card rsum">
+    <div class="why">Resumo da rodada · ${R.min} min</div>
+    <div class="rtit">${tit}</div>
+    <div class="rbig"><b>${R.ok}</b><span>de ${R.n} certas${R.g?` · ${R.g} no chute`:''}</span></div>
+    ${up.length?`<div class="rsec"><div class="t">📈 Subiram</div><ul>${up.map(row).join('')}</ul></div>`:''}
+    ${down.length?`<div class="rsec"><div class="t">📉 Precisam de atenção</div><ul>${down.map(row).join('')}</ul></div>`:''}
+    <div class="rsec"><div class="t">🔁 Revisão</div><div class="small">${R.back?`${R.back} ${R.back===1?'questão volta':'questões voltam'} para revisão nas próximas 24 h.`:'Nenhuma questão desta rodada volta antes de amanhã.'}</div></div>
+    <div class="rsec"><div class="t">🔥 Hoje</div><div class="small">${H.hoje} de ${H.meta} questões${H.done?' · meta batida ✓':` · faltam ${H.meta-H.hoje}`}${H.run?' · sequência de '+dias(H.run):''}</div></div>
+    <div class="actions"><button class="btn" data-act="round-next">Mais uma rodada</button><button class="btn ghost" data-act="go-painel">Ver painel</button></div>
+  </div>`;
+}
+
 function renderTreinar(){
   let h=`<div class="seg" style="margin-bottom:10px">
     <button class="${U.mode==='smart'?'on':''}" data-act="mode" data-m="smart">Inteligente</button>
@@ -1451,6 +1547,8 @@ function renderTreinar(){
   </div>
   <select id="discSel" aria-label="Disciplina" style="margin-bottom:10px"><option value="">Todas do edital ${esc(P().n)}</option>${discOrder().map(d=>`<option value="${d}" ${U.disc===d?'selected':''}>${esc(DISC[d].n)}</option>`).join('')}</select>`;
   if(U.topic){const a=U.topic.split('|').slice(1).join('|');h+=`<div style="margin-bottom:10px"><span class="chip">Assunto: ${esc(a)} <button data-act="clear-topic" aria-label="Remover filtro">×</button></span></div>`}
+  if(U.roundSum)return h+roundSummary(U.roundSum);
+  {const R=U.round;h+=`<div class="rprog"><span class="tiny muted">Rodada · ${R.n} de ${ROUND}${R.n?` · ${R.ok} certas`:''}</span><div class="bar"><i class="hi" style="width:${R.n/ROUND*100}%"></i></div></div>`}
   if(!U.cur||!QMAP[U.cur]){
     const p=pickNext();
     if(p){U.cur=p.id;U.why=p.why;U.answered=null;U.guess=false}
@@ -1475,9 +1573,9 @@ function renderTreinar(){
     ${q.x?`<div class="exp"><div class="t">${q.mt||q.gs?'Comentário do professor':'Explicação'}</div>${esc(q.x)}</div>`:''}
     ${refLinks(q.d,q.a,q.mt,ok?'rev':'rev bad')}
     ${comBox(q.id)}
-    <div class="actions"><button class="btn" data-act="next">Próxima questão →</button></div>`;
+    <div class="actions">${U.round.n>=ROUND?'<button class="btn" data-act="round-end">Ver resumo da rodada →</button>':'<button class="btn" data-act="next">Próxima questão →</button>'}</div>`;
   } else h+=`<div class="actions"><button class="btn ghost" data-act="next">Pular</button></div>`;
-  h+=`</div><div class="sess">Nesta sessão: ${U.sess.n} respondidas · ${U.sess.ok} acertos</div>`;
+  {const H=habit();h+=`</div><div class="sess">Hoje: ${H.hoje} de ${H.meta}${H.done?' ✓':''}${H.run?' · 🔥 '+dias(H.run):''} · nesta sessão ${U.sess.n} respondidas, ${U.sess.ok} acertos</div>`}
   return h;
 }
 function altsHtml(q,ans,clickable){
@@ -1711,6 +1809,28 @@ document.addEventListener('click',async e=>{
     schedule(q.id,true,true,A.t);A.g=true;save('progresso');render();
   }
   else if(a==='next'){U.last=U.cur;U.cur=null;U.answered=null;U.guess=false;render();window.scrollTo(0,0)}
+  else if(a==='round-end'){
+    const R=U.round,tp={};
+    for(const k in R.dom0){const x=topicDom(k);tp[k]={a:k.split('|').slice(1).join('|'),d:k.split('|')[0],from:R.dom0[k],to:x.dom}}
+    const soon=Date.now()+DAY;
+    U.roundSum={n:R.n,ok:R.ok,g:R.g,min:Math.max(1,Math.round((Date.now()-R.t0)/6e4)),tp:Object.values(tp),
+      back:[...new Set(R.ids)].filter(id=>S.leit[id]&&S.leit[id].d<=soon).length};
+    U.round=newRound();U.last=U.cur;U.cur=null;U.answered=null;U.guess=false;render();window.scrollTo(0,0)
+  }
+  else if(a==='round-next'){U.roundSum=null;render();window.scrollTo(0,0)}
+  else if(a==='go-painel'){U.roundSum=null;go('painel')}
+  else if(a==='meta-open'){const m=metaNow();openModal(`<h3>Meta diária</h3><p class="muted small">Quantas questões por dia? Cada dia em que você bate a meta soma 1 na sua sequência 🔥. Uma vez por semana, um dia sem meta é coberto por uma proteção ❄️, desde que no dia seguinte você volte a bater a meta.</p>
+      <div class="row" style="margin:10px 0">${[5,10,15,20,30,50].map(v=>`<button class="btn small ${v===m?'':'ghost'}" data-act="meta-set" data-v="${v}">${v}</button>`).join('')}</div>
+      <label class="lb" for="metaIn">Ou digite outro valor</label><div class="row"><input id="metaIn" type="number" inputmode="numeric" min="1" max="300" value="${m}" style="max-width:110px"><button class="btn small" data-act="meta-set">Salvar</button></div>
+      <div class="tiny muted" style="margin-top:8px">Mudar a meta vale a partir de hoje; os dias passados continuam contando com a meta da época.</div>
+      <div class="actions"><button class="btn ghost" data-act="close-modal">Fechar</button></div>`)}
+  else if(a==='meta-set'){
+    const v=b.dataset.v?+b.dataset.v:Math.round(+($('#metaIn')||{}).value);
+    if(!Number.isInteger(v)||v<1||v>300){toast('Escolha um número de 1 a 300');return}
+    const now=Date.now(),d0=new Date();d0.setHours(0,0,0,0);
+    S.metas=(S.metas||[]).filter(x=>x[0]<d0.getTime());S.metas.push([now,v]);
+    save('progresso');closeModal();render();toast('Meta diária: '+v+' questões');
+  }
   else if(a==='train-q'){U.cur=b.dataset.id;U.why='Escolhida por você no banco';U.answered=null;U.guess=false;U.mode='smart';U.topic='';U.disc='';go('treinar')}
   else if(a==='new-q')openForm();
   else if(a==='edit-q')openForm(b.dataset.id);
@@ -1766,7 +1886,7 @@ document.addEventListener('click',async e=>{
     toast(`Backup restaurado: ${allQ().length} questões, ${S.tent.length} respostas`);
   }
   else if(a==='reset-open')openModal(`<h3>Zerar progresso?</h3><p class="muted small">Apaga respostas e revisões. Seus comentários e questões continuam.</p><div class="actions"><button class="btn ghost" data-act="close-modal">Cancelar</button><button class="btn danger" data-act="reset-do">Zerar</button></div>`);
-  else if(a==='reset-do'){S.tent=[];S.leit={};U.sess={n:0,ok:0};U.cur=null;U.answered=null;save('progresso');closeModal();render();toast('Progresso zerado')}
+  else if(a==='reset-do'){S.tent=[];S.leit={};U.sess={n:0,ok:0};U.round=newRound();U.roundSum=null;U.cur=null;U.answered=null;save('progresso');closeModal();render();toast('Progresso zerado')}
 });
 document.addEventListener('input',e=>{
   const t=e.target;
